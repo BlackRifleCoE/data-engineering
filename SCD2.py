@@ -72,26 +72,9 @@ class Type2Dimension:
         changes_df = staging_df.filter((col("ExistingRowHash").isNull()) | (col("ExistingRowHash") != col("row_hash")))
 
         # Proceed only if there are changes
-        if changes_df.count() > 0:
+        changes_count = changes_df.count()
+        if changes_count > 0:
             logger.info("Changes detected")
-
-            # Prepare updates (set current records to historical)
-            updates_df = changes_df.filter(col("ExistingRowHash").isNotNull())
-
-            # Find the number of updates
-            self.updatedCount = updates_df.count()
-
-            if self.updatedCount > 0:
-                dim_table = DeltaTable.forName(self.spark, self.dimensionTableName)
-                dim_table.alias("dim").merge(
-                    updates_df.alias("updates"),
-                    f"dim.{self.PKColumn} = updates.{self.PKColumn} AND dim.Is_Current = 1"
-                ).whenMatchedUpdate(set={
-                    "Effective_End_Date": to_date(lit(self.latest_batch_timestamp)),
-                    "Is_Current": "0"
-                }).execute()
-
-                logger.info(f"Records updated: {self.updatedCount}")
 
             # Get current max surrogate key to start incrementing
             max_id_row = self.dimensionDataFrame.select(max(self.SKColumn).alias("maxID")).collect()[0]
@@ -109,15 +92,25 @@ class Type2Dimension:
                 "Is_Current", lit(1)
             ).drop("LoadTimestamp", "ExistingRowHash")
 
-            # Reorder columns to match dimension table (Risk_SK first)
+            # Reorder columns to match dimension table (SK first)
             dim_cols = [self.SKColumn] + [c for c in new_records_df.columns if c != self.SKColumn]
             new_records_df = new_records_df.select(dim_cols)
 
-            logger.info(f"Records inserted: {new_records_df.count()}")
+            new_records_count = new_records_df.count()
 
-            # Append new records
-            new_records_df.write.format("delta").mode("append").saveAsTable(self.dimensionTableName)
-            return new_records_df.count()
+            # Use a single atomic merge operation for both expiring old records and inserting new ones
+            # This ensures data integrity: either both operations succeed or neither does
+            dim_table = DeltaTable.forName(self.spark, self.dimensionTableName)
+            dim_table.alias("dim").merge(
+                new_records_df.alias("source"),
+                f"dim.{self.PKColumn} = source.{self.PKColumn} AND dim.Is_Current = 1"
+            ).whenMatchedUpdate(set={
+                "Effective_End_Date": to_date(lit(self.latest_batch_timestamp)),
+                "Is_Current": lit(0)
+            }).whenNotMatchedInsertAll().execute()
+
+            logger.info(f"Records processed atomically: {new_records_count}")
+            return new_records_count
 
         else:
             logger.info("No new or updated records found.")
