@@ -1,6 +1,6 @@
 # Import necessary libraries
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, sha2, concat_ws, current_date, lit, max, row_number, to_date
+from pyspark.sql.functions import col, sha2, concat_ws, current_date, lit, max as spark_max, row_number, to_date
 from pyspark.sql.window import Window
 from delta.tables import DeltaTable
 from pyspark.sql import DataFrame
@@ -34,8 +34,9 @@ class Type2Dimension:
         else:
             # If dimensionDF is not empty, use the provided DataFrame
             self.dimensionDataFrame = dimensionDF
-            # Find the latest batch timestamp
-            self.latest_batch_timestamp = self.bronzeDataFrame.agg(max("LoadTimestamp").alias("latest_timestamp")).collect()[0]["latest_timestamp"]
+            # Find the latest batch timestamp and convert to date for Effective_End_Date
+            latest_ts = self.bronzeDataFrame.agg(spark_max(col("LoadTimestamp").cast("timestamp")).alias("latest_timestamp")).collect()[0]["latest_timestamp"]
+            self.latest_batch_timestamp = latest_ts.date() if latest_ts is not None else None
 
         # Initialize other class variables
         self.columnList = hashColumnList
@@ -87,14 +88,14 @@ class Type2Dimension:
                     updates_df.alias("updates"),
                     f"dim.{self.PKColumn} = updates.{self.PKColumn} AND dim.Is_Current = 1"
                 ).whenMatchedUpdate(set={
-                    "Effective_End_Date": to_date(lit(self.latest_batch_timestamp)),
+                    "Effective_End_Date": lit(self.latest_batch_timestamp),
                     "Is_Current": "0"
                 }).execute()
 
                 logger.info(f"Records updated: {self.updatedCount}")
 
             # Get current max surrogate key to start incrementing
-            max_id_row = self.dimensionDataFrame.select(max(self.SKColumn).alias("maxID")).collect()[0]
+            max_id_row = self.dimensionDataFrame.select(spark_max(self.SKColumn).alias("maxID")).collect()[0]
             next_id = max_id_row["maxID"] + 1 if max_id_row["maxID"] else 1
 
             # Add auto-incrementing surrogate key to new records using row_number
