@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Callable
 import tempfile
 import shutil
+import os
 
 
 @pytest.fixture(scope="session")
@@ -20,14 +21,24 @@ def spark_session():
 
     Configured for local testing with Delta support.
     """
-    spark = (SparkSession.builder
-             .appName("DimensionProcessor_Tests")
-             .master("local[*]")
-             .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
-             .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
-             .config("spark.sql.shuffle.partitions", "2")  # Reduce partitions for tests
-             .config("spark.default.parallelism", "2")
-             .getOrCreate())
+    # Workaround for Windows - set a dummy HADOOP_HOME to avoid winutils.exe error
+    if os.name == 'nt' and 'HADOOP_HOME' not in os.environ:
+        # Create a temp directory for Hadoop home
+        hadoop_home = tempfile.mkdtemp(prefix="hadoop_")
+        os.environ['HADOOP_HOME'] = hadoop_home
+
+    # Import delta's configure_spark_with_delta_pip to handle Delta JAR dependencies
+    from delta import configure_spark_with_delta_pip
+
+    builder = (SparkSession.builder
+               .appName("DimensionProcessor_Tests")
+               .master("local[*]")
+               .config("spark.sql.shuffle.partitions", "2")  # Reduce partitions for tests
+               .config("spark.default.parallelism", "2")
+               .config("spark.sql.warehouse.dir", tempfile.mkdtemp(prefix="spark_warehouse_")))
+
+    # Configure Delta Lake - this handles JAR dependencies automatically
+    spark = configure_spark_with_delta_pip(builder).getOrCreate()
 
     yield spark
 

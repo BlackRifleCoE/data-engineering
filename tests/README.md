@@ -34,6 +34,16 @@ tests/
 
 ## Installation
 
+### Prerequisites
+
+**Java 11 Required:** PySpark requires Java. Install Java 11 (LTS):
+- Download: https://adoptium.net/temurin/releases/?version=11
+- After installation, set `JAVA_HOME`:
+  ```powershell
+  # Windows PowerShell
+  $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-11.x.xx-hotspot"
+  ```
+
 ### Install Test Dependencies
 
 ```bash
@@ -47,6 +57,7 @@ pip install -r requirements-dev.txt
 
 ### Dependencies
 
+- **Java 11** (required for PySpark)
 - pytest >= 7.4.0
 - pytest-spark >= 0.6.0
 - pyspark >= 3.4.0
@@ -310,6 +321,21 @@ import pyspark.sql.functions as F
 ## Troubleshooting
 
 ### Test Failures
+
+**Windows Testing Limitations**
+
+Running PySpark/Delta Lake tests on Windows can be challenging due to Hadoop dependencies. If you encounter errors like:
+- "RuntimeError: Java gateway process exited"
+- "HADOOP_HOME and hadoop.home.dir are unset"
+- "ClassNotFoundException: DeltaCatalog"
+
+**Recommended approach:** Test in Microsoft Fabric Notebooks instead (see section below).
+
+**For local Windows testing:**
+- Java 11 is required (NOT Java 25)
+- Set JAVA_HOME: `$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-11.0.29.7-hotspot"`
+- You may need to download winutils.exe for Hadoop compatibility
+- Consider using WSL2 (Windows Subsystem for Linux) or Docker instead
 
 **"NameError: name 'spark' is not defined"**
 - Ensure SCD2.py has been fixed with SparkSession injection
