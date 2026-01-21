@@ -93,9 +93,11 @@ class Type2Dimension:
 
                 logger.info(f"Records updated: {self.updatedCount}")
 
-            # Get current max surrogate key to start incrementing
-            max_id_row = self.dimensionDataFrame.select(max(self.SKColumn).alias("maxID")).collect()[0]
-            next_id = max_id_row["maxID"] + 1 if max_id_row["maxID"] else 1
+            # Get current max surrogate key from Delta table (not stale DataFrame)
+            max_sk_result = self.spark.read.table(self.dimensionTableName) \
+                .agg(max(self.SKColumn).alias("maxID")) \
+                .collect()[0]["maxID"]
+            next_id = (max_sk_result + 1) if max_sk_result else 1
 
             # Add auto-incrementing surrogate key to new records using row_number
             window_spec = Window.orderBy(self.PKColumn)
