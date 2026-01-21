@@ -84,3 +84,53 @@ The Type 2 processor uses Delta Lake's merge functionality for atomic updates. E
 - pyspark (including pyspark.sql and pyspark.sql.functions)
 - delta-spark (Delta Lake integration)
 - Python standard library: typing, logging
+
+## Testing
+
+### Test Suite Overview
+
+The project includes a comprehensive test suite with 30+ tests covering:
+- Hash generation and change detection
+- SCD2 initialization and bootstrapping
+- Record updates and versioning
+- Edge cases (nulls, unicode, empty datasets)
+- Delta Lake integration
+- Type1 dimension processing
+
+### Running Tests
+
+```bash
+# Install test dependencies
+pip install -r requirements-dev.txt
+
+# Run all tests
+pytest
+
+# Run with coverage
+pytest --cov=. --cov-report=html
+
+# Run unit tests only (fast)
+pytest -m unit
+
+# Run integration tests (requires Delta Lake)
+pytest -m integration
+```
+
+### Test Structure
+
+- `tests/test_type2_dimension.py` - Core SCD2 tests (hash, init)
+- `tests/test_type2_edge_cases.py` - Edge cases and error handling
+- `tests/test_type2_integration.py` - Delta Lake integration tests
+- `tests/test_type1_dimension.py` - Type1 dimension tests
+- `tests/helpers/` - Test utilities (data generators, assertions)
+- `tests/conftest.py` - Pytest fixtures
+
+See [tests/README.md](tests/README.md) for detailed testing documentation.
+
+### Key Fixes Applied
+
+The following critical bugs were fixed to enable testing:
+1. Added `SparkSession` parameter to Type2Dimension constructor
+2. Fixed parameter typo: `primaryKeyColunmName` → `primaryKeyColumnName`
+3. Fixed surrogate key generation bug (off-by-one error)
+4. Replaced string-based empty checks with `Optional[DataFrame]`

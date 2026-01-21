@@ -4,7 +4,7 @@ from pyspark.sql.functions import col, sha2, concat_ws, current_date, lit, max, 
 from pyspark.sql.window import Window
 from delta.tables import DeltaTable
 from pyspark.sql import DataFrame
-from typing import List
+from typing import List, Optional
 import logging
 
 # Configure logging
@@ -12,16 +12,19 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class Type2Dimension:
-    def __init__(self, bronzeDF: DataFrame, dimensionDF: DataFrame, dimensionTableName: str, hashColumnList: List[str], primaryKeyColunmName: str, surrogateKeyColumnName: str):
+    def __init__(self, spark: SparkSession, bronzeDF: DataFrame, dimensionDF: Optional[DataFrame], dimensionTableName: str, hashColumnList: List[str], primaryKeyColumnName: str, surrogateKeyColumnName: str):
+
+        # Store SparkSession
+        self.spark = spark
 
         # Initialize the bronze DataFrame
         self.bronzeDataFrame = bronzeDF
         self.latest_batch_timestamp = ""
-        self.dimensionDataFrame = ""
+        self.dimensionDataFrame: Optional[DataFrame] = None
 
         # Check if dimensionDF is empty, if so create an empty DataFrame with the required schema
-        if dimensionDF == "":
-            self.dimensionDataFrame = spark.createDataFrame([], bronzeDF.schema
+        if dimensionDF is None:
+            self.dimensionDataFrame = self.spark.createDataFrame([], bronzeDF.schema
                                             .add(f"{surrogateKeyColumnName}", "long")
                                             .add("row_hash", "string")
                                             .add("Effective_Start_Date", "date")
@@ -36,10 +39,10 @@ class Type2Dimension:
 
         # Initialize other class variables
         self.columnList = hashColumnList
-        self.PKColumn = primaryKeyColunmName
+        self.PKColumn = primaryKeyColumnName
         self.SKColumn = surrogateKeyColumnName
         self.dimensionTableName = dimensionTableName
-        self.dimensionDataFrameCurrent = ""
+        self.dimensionDataFrameCurrent: Optional[DataFrame] = None
         self.updatedCount = 0
         logger.info("ProcessSCD2 initialized")
 
@@ -79,7 +82,7 @@ class Type2Dimension:
             self.updatedCount = updates_df.count()
 
             if self.updatedCount > 0:
-                dim_table = DeltaTable.forName(spark, self.dimensionTableName)
+                dim_table = DeltaTable.forName(self.spark, self.dimensionTableName)
                 dim_table.alias("dim").merge(
                     updates_df.alias("updates"),
                     f"dim.{self.PKColumn} = updates.{self.PKColumn} AND dim.Is_Current = 1"
@@ -90,14 +93,14 @@ class Type2Dimension:
 
                 logger.info(f"Records updated: {self.updatedCount}")
 
-            # Get current max Risk_SK to start incrementing
+            # Get current max surrogate key to start incrementing
             max_id_row = self.dimensionDataFrame.select(max(self.SKColumn).alias("maxID")).collect()[0]
             next_id = max_id_row["maxID"] + 1 if max_id_row["maxID"] else 1
 
-            # Add auto-incrementing Risk_SK to new records using row_number
+            # Add auto-incrementing surrogate key to new records using row_number
             window_spec = Window.orderBy(self.PKColumn)
-            new_records_df = changes_df.select("*").withColumn(
-                self.SKColumn, row_number().over(window_spec) + lit(next_id - 1)
+            new_records_df = changes_df.withColumn(
+                self.SKColumn, row_number().over(window_spec) + lit(next_id) - lit(1)
             ).withColumn(
                 "Effective_Start_Date", col("LoadTimestamp").cast("date")
             ).withColumn(
